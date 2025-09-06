@@ -5,10 +5,14 @@
 import streamlit as st
 import sys
 import os
+import threading
+import time
 from pathlib import Path
 
-# Add app directory to path
-sys.path.append(str(Path(__file__).parent))
+# Fix import paths - add both current and parent directories
+current_dir = Path(__file__).parent
+sys.path.insert(0, str(current_dir))
+sys.path.insert(0, str(current_dir.parent))
 
 # Import authentication system
 from core.authentication import (
@@ -17,6 +21,7 @@ from core.authentication import (
     logout_user,
     AuthenticationManager
 )
+from core.database import DatabaseManager
 
 # Page configuration
 st.set_page_config(
@@ -99,13 +104,51 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def cleanup_worker():
+    """Background worker to clean up expired sessions"""
+    while True:
+        try:
+            auth_manager = AuthenticationManager()
+            auth_manager.cleanup_expired_sessions()
+            
+            db_manager = DatabaseManager()
+            db_manager.cleanup_expired_data()
+            
+            time.sleep(3600)  # Run every hour
+        except Exception as e:
+            # Log error but continue running
+            print(f"Cleanup worker error: {e}")
+            time.sleep(300)  # Wait 5 min on error
+
+def initialize_app():
+    """Initialize app-wide settings and background services"""
+    # Start cleanup worker if not already started
+    if 'cleanup_started' not in st.session_state:
+        try:
+            cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True)
+            cleanup_thread.start()
+            st.session_state.cleanup_started = True
+        except Exception as e:
+            print(f"Failed to start cleanup worker: {e}")
+    
+    # Initialize session state
+    if 'initialization_complete' not in st.session_state:
+        st.session_state.initialization_complete = False
+
 def main():
     """Main application entry point with authentication"""
+    
+    # Initialize app services
+    initialize_app()
     
     # Check authentication first
     if not check_authentication():
         show_login_page()
         return
+    
+    # Mark initialization as complete
+    if not st.session_state.initialization_complete:
+        st.session_state.initialization_complete = True
     
     # User is authenticated, show the main app
     show_main_application()
@@ -119,11 +162,22 @@ def show_main_application():
     # Sidebar with user controls
     show_authenticated_sidebar()
     
-    # Check if this is first run after login
-    if not os.path.exists('/app/data/database'):
+    # Check if this is first run after login - use better path detection
+    db_path = get_database_path()
+    if not os.path.exists(db_path):
         show_setup_screen()
     else:
         show_main_dashboard()
+
+def get_database_path():
+    """Get database path with environment variable support"""
+    base_path = os.environ.get('APP_BASE_PATH', '/app')
+    return os.path.join(base_path, 'data', 'database', 'stylist.db')
+
+def get_user_upload_path(user_id):
+    """Get user-specific upload path"""
+    base_path = os.environ.get('APP_BASE_PATH', '/app')
+    return os.path.join(base_path, 'uploads', 'users', user_id)
 
 def show_app_header():
     """Show application header with user information"""
@@ -176,19 +230,32 @@ def show_authenticated_sidebar():
         # Navigation
         st.markdown("### 📊 Quick Stats")
         
-        # Mock stats for now (will be real data later)
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Items", "0")
-        with col2:
-            st.metric("Complete", "0%")
+        # Get real stats from database
+        try:
+            db_manager = DatabaseManager()
+            user_id = st.session_state.user_id
+            clothing_count = db_manager.get_clothing_count(user_id)
+            completeness = db_manager.get_wardrobe_completeness(user_id)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Items", str(clothing_count))
+            with col2:
+                st.metric("Complete", f"{completeness}%")
+        except Exception as e:
+            # Fallback to mock stats if database not ready
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Items", "0")
+            with col2:
+                st.metric("Complete", "0%")
         
         # Admin controls
         if user_info['is_admin']:
             st.markdown("### 🔧 Admin Controls")
             
             if st.button("👥 Manage Users", use_container_width=True):
-                st.switch_page("pages/Admin.py")
+                st.info("User management coming soon!")
             
             if st.button("📊 Security Logs", use_container_width=True):
                 show_security_logs()
@@ -205,47 +272,51 @@ def show_security_logs():
     
     st.markdown("### 🔍 Security Audit Logs")
     
-    auth_manager = AuthenticationManager()
-    logs = auth_manager.get_security_logs(50)
+    try:
+        auth_manager = AuthenticationManager()
+        logs = auth_manager.get_security_logs(50)
+        
+        if logs:
+            # Create a DataFrame for better display
+            import pandas as pd
+            
+            df = pd.DataFrame(logs)
+            df['timestamp'] = pd.to_datetime(df['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Color code by success/failure
+            def color_row(row):
+                if row['success']:
+                    return ['background-color: #f0fdf4'] * len(row)  # Light green
+                else:
+                    return ['background-color: #fef2f2'] * len(row)  # Light red
+            
+            styled_df = df.style.apply(color_row, axis=1)
+            st.dataframe(styled_df, use_container_width=True)
+            
+            # Summary stats
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total_events = len(logs)
+                st.metric("Total Events", total_events)
+            
+            with col2:
+                successful_logins = len([log for log in logs if log['action'] == 'LOGIN_SUCCESS'])
+                st.metric("Successful Logins", successful_logins)
+            
+            with col3:
+                failed_logins = len([log for log in logs if log['action'] == 'LOGIN_FAILED'])
+                st.metric("Failed Logins", failed_logins)
+            
+            with col4:
+                unique_ips = len(set([log['ip_address'] for log in logs if log['ip_address'] and log['ip_address'] != 'streamlit-client']))
+                st.metric("Unique IPs", unique_ips)
+            
+        else:
+            st.info("No security logs found.")
     
-    if logs:
-        # Create a DataFrame for better display
-        import pandas as pd
-        
-        df = pd.DataFrame(logs)
-        df['timestamp'] = pd.to_datetime(df['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Color code by success/failure
-        def color_row(row):
-            if row['success']:
-                return ['background-color: #f0fdf4'] * len(row)  # Light green
-            else:
-                return ['background-color: #fef2f2'] * len(row)  # Light red
-        
-        styled_df = df.style.apply(color_row, axis=1)
-        st.dataframe(styled_df, use_container_width=True)
-        
-        # Summary stats
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            total_events = len(logs)
-            st.metric("Total Events", total_events)
-        
-        with col2:
-            successful_logins = len([log for log in logs if log['action'] == 'LOGIN_SUCCESS'])
-            st.metric("Successful Logins", successful_logins)
-        
-        with col3:
-            failed_logins = len([log for log in logs if log['action'] == 'LOGIN_FAILED'])
-            st.metric("Failed Logins", failed_logins)
-        
-        with col4:
-            unique_ips = len(set([log['ip_address'] for log in logs if log['ip_address']]))
-            st.metric("Unique IPs", unique_ips)
-        
-    else:
-        st.info("No security logs found.")
+    except Exception as e:
+        st.error(f"Error loading security logs: {e}")
 
 def show_setup_screen():
     """Show initial setup screen for authenticated users"""
@@ -277,17 +348,28 @@ def show_setup_screen():
             # Initialize database and user-specific folders
             user_id = st.session_state.user_id
             
-            os.makedirs('/app/data/database', exist_ok=True)
-            os.makedirs(f'/app/uploads/users/{user_id}/clothing', exist_ok=True)
-            os.makedirs(f'/app/uploads/users/{user_id}/body_analysis', exist_ok=True)
-            
-            st.success("✅ Your personal wardrobe space initialized!")
-            st.balloons()
-            
-            # Pause for effect then reload
-            import time
-            time.sleep(2)
-            st.rerun()
+            try:
+                # Create directories using dynamic paths
+                base_path = os.environ.get('APP_BASE_PATH', '/app')
+                
+                os.makedirs(os.path.join(base_path, 'data', 'database'), exist_ok=True)
+                
+                user_upload_path = get_user_upload_path(user_id)
+                os.makedirs(os.path.join(user_upload_path, 'clothing'), exist_ok=True)
+                os.makedirs(os.path.join(user_upload_path, 'body_analysis'), exist_ok=True)
+                
+                # Initialize database
+                db_manager = DatabaseManager()
+                
+                st.success("✅ Your personal wardrobe space initialized!")
+                st.balloons()
+                
+                # Pause for effect then reload
+                time.sleep(2)
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Initialization failed: {e}")
 
 def show_main_dashboard():
     """Show main application dashboard for authenticated users"""
@@ -389,10 +471,19 @@ def show_main_dashboard():
         st.success("✅ Secure Login")
     
     with status_col2:
-        st.success("✅ Database Ready")
+        try:
+            db_manager = DatabaseManager()
+            st.success("✅ Database Ready")
+        except:
+            st.warning("⚠️ Database Initializing")
     
     with status_col3:
-        st.success("✅ AI Models Loaded")
+        try:
+            # Check if AI models are available
+            import mediapipe as mp
+            st.success("✅ AI Models Loaded")
+        except:
+            st.warning("⚠️ AI Models Loading")
     
     with status_col4:
         st.success("✅ Privacy Protected")

@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import json
 import time
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Tuple
 import re
@@ -16,8 +17,13 @@ import hmac
 class AuthenticationManager:
     """Secure authentication system for Personal Stylist AI"""
     
-    def __init__(self, db_path="/app/data/database/stylist.db"):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        if db_path is None:
+            base_path = os.environ.get('APP_BASE_PATH', '/app')
+            self.db_path = os.path.join(base_path, 'data', 'database', 'stylist.db')
+        else:
+            self.db_path = db_path
+            
         self.session_timeout = 24 * 60 * 60  # 24 hours in seconds
         self.max_login_attempts = 5
         self.lockout_duration = 15 * 60  # 15 minutes in seconds
@@ -25,59 +31,84 @@ class AuthenticationManager:
     
     def ensure_auth_tables(self):
         """Create authentication tables if they don't exist"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # User authentication table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS user_auth (
-                    user_id TEXT PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    email TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    salt TEXT NOT NULL,
-                    is_admin BOOLEAN DEFAULT FALSE,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_login TIMESTAMP,
-                    failed_login_attempts INTEGER DEFAULT 0,
-                    locked_until TIMESTAMP,
-                    password_reset_token TEXT,
-                    password_reset_expires TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id)
-                )
-            ''')
-            
-            # Active sessions table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS user_sessions (
-                    session_id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TIMESTAMP NOT NULL,
-                    ip_address TEXT,
-                    user_agent TEXT,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    FOREIGN KEY (user_id) REFERENCES users (id)
-                )
-            ''')
-            
-            # Security audit log table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS security_audit_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT,
-                    action TEXT NOT NULL,
-                    ip_address TEXT,
-                    user_agent TEXT,
-                    success BOOLEAN,
-                    details TEXT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            conn.commit()
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        
+        try:
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                cursor = conn.cursor()
+                
+                # Enable WAL mode for better concurrency
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA foreign_keys=ON")
+                
+                # User authentication table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS user_auth (
+                        user_id TEXT PRIMARY KEY,
+                        username TEXT UNIQUE NOT NULL,
+                        email TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        salt TEXT NOT NULL,
+                        is_admin BOOLEAN DEFAULT FALSE,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_login TIMESTAMP,
+                        failed_login_attempts INTEGER DEFAULT 0,
+                        locked_until TIMESTAMP,
+                        password_reset_token TEXT,
+                        password_reset_expires TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users (id)
+                    )
+                ''')
+                
+                # Active sessions table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS user_sessions (
+                        session_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        expires_at TIMESTAMP NOT NULL,
+                        ip_address TEXT,
+                        user_agent TEXT,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        FOREIGN KEY (user_id) REFERENCES users (id)
+                    )
+                ''')
+                
+                # Security audit log table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS security_audit_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT,
+                        action TEXT NOT NULL,
+                        ip_address TEXT,
+                        user_agent TEXT,
+                        success BOOLEAN,
+                        details TEXT,
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                conn.commit()
+        
+        except sqlite3.Error as e:
+            print(f"Database initialization error: {e}")
+            # Don't raise - let the app continue and try again later
+    
+    def get_connection(self):
+        """Get database connection with proper configuration"""
+        try:
+            conn = sqlite3.connect(self.db_path, timeout=30.0)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode = WAL")  # Better concurrency
+            return conn
+        except sqlite3.Error as e:
+            st.error(f"Database connection failed: {e}")
+            raise
     
     def hash_password(self, password: str, salt: str = None) -> Tuple[str, str]:
         """Securely hash password with salt"""
@@ -150,7 +181,7 @@ class AuthenticationManager:
             return False, message
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Check if username or email already exists
@@ -204,11 +235,37 @@ class AuthenticationManager:
         except Exception as e:
             return False, f"Error creating user: {str(e)}"
     
+    def get_client_info(self):
+        """Get client IP and user agent - Streamlit safe version"""
+        try:
+            # Streamlit doesn't easily expose request headers
+            # Use fallback values that are safe
+            ip_address = "streamlit-client"
+            user_agent = "streamlit-app"
+            
+            # Try to get real client info if available through forwarded headers
+            # This would work if behind a reverse proxy
+            if hasattr(st, 'get_option') and st.get_option('server.enableXsrfProtection'):
+                # In a production setup with proper reverse proxy,
+                # you might access these through specific server config
+                pass
+            
+            return ip_address, user_agent
+            
+        except Exception:
+            return "unknown", "unknown"
+    
     def authenticate_user(self, username: str, password: str, ip_address: str = None, user_agent: str = None) -> Tuple[bool, str, Optional[str]]:
         """Authenticate user login"""
         
+        # Get client info if not provided
+        if ip_address is None or user_agent is None:
+            client_ip, client_ua = self.get_client_info()
+            ip_address = ip_address or client_ip
+            user_agent = user_agent or client_ua
+        
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Get user authentication info
@@ -332,24 +389,28 @@ class AuthenticationManager:
         session_id = secrets.token_hex(32)
         expires_at = datetime.now() + timedelta(seconds=self.session_timeout)
         
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            # Deactivate old sessions for this user
-            cursor.execute('''
-                UPDATE user_sessions 
-                SET is_active = FALSE 
-                WHERE user_id = ? AND is_active = TRUE
-            ''', (user_id,))
-            
-            # Create new session
-            cursor.execute('''
-                INSERT INTO user_sessions 
-                (session_id, user_id, expires_at, ip_address, user_agent)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (session_id, user_id, expires_at.isoformat(), ip_address, user_agent))
-            
-            conn.commit()
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Deactivate old sessions for this user
+                cursor.execute('''
+                    UPDATE user_sessions 
+                    SET is_active = FALSE 
+                    WHERE user_id = ? AND is_active = TRUE
+                ''', (user_id,))
+                
+                # Create new session
+                cursor.execute('''
+                    INSERT INTO user_sessions 
+                    (session_id, user_id, expires_at, ip_address, user_agent)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (session_id, user_id, expires_at.isoformat(), ip_address, user_agent))
+                
+                conn.commit()
+        
+        except Exception as e:
+            print(f"Session creation error: {e}")
         
         return session_id
     
@@ -360,7 +421,7 @@ class AuthenticationManager:
             return False, None
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -404,13 +465,14 @@ class AuthenticationManager:
                 return True, user_id
         
         except Exception as e:
+            print(f"Session validation error: {e}")
             return False, None
     
     def logout_user(self, session_id: str) -> bool:
         """Logout user by deactivating session"""
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Get user_id for logging
@@ -442,6 +504,7 @@ class AuthenticationManager:
                     return True
         
         except Exception as e:
+            print(f"Logout error: {e}")
             return False
         
         return False
@@ -450,7 +513,7 @@ class AuthenticationManager:
         """Get user information"""
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -476,6 +539,7 @@ class AuthenticationManager:
                     }
         
         except Exception as e:
+            print(f"Get user info error: {e}")
             return None
         
         return None
@@ -485,7 +549,7 @@ class AuthenticationManager:
         """Log security events for auditing"""
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -498,13 +562,13 @@ class AuthenticationManager:
         
         except Exception as e:
             # Don't fail the main operation if logging fails
-            pass
+            print(f"Security logging error: {e}")
     
     def get_security_logs(self, limit: int = 100) -> list:
         """Get recent security logs for admin review"""
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -529,13 +593,14 @@ class AuthenticationManager:
                 ]
         
         except Exception as e:
+            print(f"Security logs error: {e}")
             return []
     
     def cleanup_expired_sessions(self):
         """Clean up expired sessions (run periodically)"""
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -547,7 +612,7 @@ class AuthenticationManager:
                 conn.commit()
         
         except Exception as e:
-            pass
+            print(f"Session cleanup error: {e}")
 
 # =============================================================================
 # STREAMLIT AUTHENTICATION INTEGRATION
@@ -568,38 +633,55 @@ def check_authentication():
     """Check if user is authenticated and session is valid"""
     
     init_session_state()
-    auth_manager = AuthenticationManager()
     
-    # Check if we have a session ID
-    if st.session_state.session_id:
-        is_valid, user_id = auth_manager.validate_session(st.session_state.session_id)
+    try:
+        auth_manager = AuthenticationManager()
         
-        if is_valid and user_id:
-            # Session is valid, update user info
-            user_info = auth_manager.get_user_info(user_id)
-            if user_info:
-                st.session_state.authenticated = True
-                st.session_state.user_id = user_id
-                st.session_state.user_info = user_info
-                return True
+        # Check if we have a session ID
+        if st.session_state.session_id:
+            is_valid, user_id = auth_manager.validate_session(st.session_state.session_id)
+            
+            if is_valid and user_id:
+                # Session is valid, update user info
+                user_info = auth_manager.get_user_info(user_id)
+                if user_info:
+                    st.session_state.authenticated = True
+                    st.session_state.user_id = user_id
+                    st.session_state.user_info = user_info
+                    return True
+        
+        # No valid session
+        st.session_state.authenticated = False
+        st.session_state.user_id = None
+        st.session_state.user_info = None
+        st.session_state.session_id = None
+        return False
     
-    # No valid session
-    st.session_state.authenticated = False
-    st.session_state.user_id = None
-    st.session_state.user_info = None
-    st.session_state.session_id = None
-    return False
+    except Exception as e:
+        print(f"Authentication check error: {e}")
+        # Clear session on error
+        st.session_state.authenticated = False
+        st.session_state.user_id = None
+        st.session_state.user_info = None
+        st.session_state.session_id = None
+        return False
 
 def show_login_page():
     """Display login/registration page"""
     
-    auth_manager = AuthenticationManager()
+    try:
+        auth_manager = AuthenticationManager()
+        
+        # Check if this is the first user (admin setup)
+        with auth_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM user_auth")
+            user_count = cursor.fetchone()[0]
     
-    # Check if this is the first user (admin setup)
-    with sqlite3.connect(auth_manager.db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM user_auth")
-        user_count = cursor.fetchone()[0]
+    except Exception as e:
+        st.error(f"Database connection error: {e}")
+        st.info("Please check your database configuration and try again.")
+        return
     
     if user_count == 0:
         show_admin_setup()
@@ -629,13 +711,7 @@ def show_login_page():
             
             if submitted:
                 if username and password:
-                    # Get client info for logging
-                    ip_address = st.context.headers.get("x-forwarded-for", "unknown")
-                    user_agent = st.context.headers.get("user-agent", "unknown")
-                    
-                    success, message, session_id = auth_manager.authenticate_user(
-                        username, password, ip_address, user_agent
-                    )
+                    success, message, session_id = auth_manager.authenticate_user(username, password)
                     
                     if success:
                         st.session_state.session_id = session_id
@@ -695,6 +771,15 @@ def show_admin_setup():
         </div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Security warning
+    st.warning("⚠️ **Security Warning**: You are creating the administrator account. This account will have full system access.")
+    
+    # Add confirmation checkbox
+    security_confirmation = st.checkbox("I understand this account will have full administrative privileges")
+    
+    if not security_confirmation:
+        st.stop()
     
     with st.form("admin_setup_form"):
         st.subheader("Create Administrator Account")
