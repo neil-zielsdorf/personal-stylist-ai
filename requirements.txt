@@ -9,7 +9,22 @@ plotly==5.17.0
 requests==2.31.0
 python-dateutil==2.8.2
 pytz==2023.3
+
+# Database
 sqlite3-to-pandas==0.3.0
+
+# Image processing
 imageio==2.31.5
 scikit-image==0.22.0
+
+# Environment and configuration
 python-dotenv==1.0.0
+
+# Authentication and security
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+cryptography>=3.4.8
+
+# Additional utilities
+validators==0.22.0
+python-multipart==0.0.6
