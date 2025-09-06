@@ -1,14 +1,14 @@
 <?xml version="1.0"?>
 <Container version="2">
   <n>PersonalStylistAI</n>
-  <Repository>ghcr.io/YOUR_USERNAME/personal-stylist-ai:latest</Repository>
-  <Registry>https://github.com/YOUR_USERNAME/personal-stylist-ai</Registry>
+  <Repository>ghcr.io/neil-zielsdorf/personal-stylist-ai:latest</Repository>
+  <Registry>https://github.com/neil-zielsdorf/personal-stylist-ai</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/YOUR_USERNAME/personal-stylist-ai/issues</Support>
-  <Project>https://github.com/YOUR_USERNAME/personal-stylist-ai</Project>
+  <Support>https://github.com/neil-zielsdorf/personal-stylist-ai/issues</Support>
+  <Project>https://github.com/neil-zielsdorf/personal-stylist-ai</Project>
   <Overview>
     AI-powered personal stylist with complete privacy. Upload photos of your clothing and get personalized outfit recommendations based on weather, events, and your body type. All processing happens locally on your server.
     
@@ -20,12 +20,12 @@
     • Multi-user family support
     • Complete privacy protection
     
-    Source: https://github.com/YOUR_USERNAME/personal-stylist-ai
+    Source: https://github.com/neil-zielsdorf/personal-stylist-ai
   </Overview>
   <Category>Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8501]</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/YOUR_USERNAME/personal-stylist-ai/main/unraid/template.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/YOUR_USERNAME/personal-stylist-ai/main/src/static/icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/neil-zielsdorf/personal-stylist-ai/main/unraid/template.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/neil-zielsdorf/personal-stylist-ai/main/src/static/icon.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>

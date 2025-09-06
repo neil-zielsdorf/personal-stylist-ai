@@ -101,7 +101,7 @@ if docker-compose -f docker/docker-compose.yml ps | grep -q "Up"; then
     echo "3. Upload some clothing photos"
     echo "4. Get your first outfit recommendation!"
     echo ""
-    echo "For support, visit: https://github.com/YOUR_USERNAME/personal-stylist-ai/issues"
+    echo "For support, visit: https://github.com/neil-zielsdorf/personal-stylist-ai/issues"
 else
     error "Installation failed. Check logs with: docker-compose -f docker/docker-compose.yml logs"
 fi
