@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <n>PersonalStylistAI</n>
+  <Repository>ghcr.io/YOUR_USERNAME/personal-stylist-ai:latest</Repository>
+  <Registry>https://github.com/YOUR_USERNAME/personal-stylist-ai</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/YOUR_USERNAME/personal-stylist-ai/issues</Support>
+  <Project>https://github.com/YOUR_USERNAME/personal-stylist-ai</Project>
+  <Overview>
+    AI-powered personal stylist with complete privacy. Upload photos of your clothing and get personalized outfit recommendations based on weather, events, and your body type. All processing happens locally on your server.
+    
+    Features:
+    • Multi-angle body analysis
+    • AI clothing recognition
+    • Weather-aware outfit recommendations  
+    • Shopping intelligence
+    • Multi-user family support
+    • Complete privacy protection
+    
+    Source: https://github.com/YOUR_USERNAME/personal-stylist-ai
+  </Overview>
+  <Category>Tools:Utilities</Category>
+  <WebUI>http://[IP]:[PORT:8501]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/YOUR_USERNAME/personal-stylist-ai/main/unraid/template.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/YOUR_USERNAME/personal-stylist-ai/main/src/static/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled></DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Web UI Port" Target="8501" Default="8501" Mode="tcp" Description="Streamlit web interface port" Type="Port" Display="always" Required="true" Mask="false">8501</Config>
+  <Config Name="App Data" Target="/app/data" Default="/mnt/user/appdata/personal-stylist/data" Mode="rw" Description="Database and user data storage" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/personal-stylist/data</Config>
+  <Config Name="Uploads" Target="/app/uploads" Default="/mnt/user/appdata/personal-stylist/uploads" Mode="rw" Description="Photo uploads storage" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/personal-stylist/uploads</Config>
+  <Config Name="AI Models" Target="/app/models" Default="/mnt/user/appdata/personal-stylist/models" Mode="rw" Description="AI model cache" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/appdata/personal-stylist/models</Config>
+  <Config Name="VERSION" Target="VERSION" Default="latest" Mode="" Description="Version to run (latest, v1.0.0, etc.)" Type="Variable" Display="advanced" Required="false" Mask="false">latest</Config>
+</Container>
